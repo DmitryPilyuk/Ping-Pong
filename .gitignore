@@ -1,0 +1,5 @@
+*.o
+
+ping_pong
+
+.env
