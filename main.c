@@ -5,43 +5,40 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-#define BUFF_SIZE 1024
+#define BUFFER_SIZE 4
 #define PATH_SIZE 13
+#define N_ITERS 10
 
 enum state { READY, SLEEP };
 
-int sockfd;
-char sock_path[PATH_SIZE];
+void act(int id);
 
-void handle_signal() {
-  printf("\nExiting...\n");
-  close(sockfd);
-  unlink(sock_path);
-  exit(0);
+int main(void) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    act(0);
+  } else {
+    act(1);
+    wait(NULL);
+  }
+  return 0;
 }
 
-int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s [0 or 1]\n", argv[0]);
-    exit(1);
-  }
+void act(int id) {
+  enum state st = id == 0 ? SLEEP : READY;
 
-  signal(SIGINT, handle_signal);
-  signal(SIGTERM, handle_signal);
+  char buffer[BUFFER_SIZE];
 
-  int proc_idx = atoi(argv[1]);
-  enum state st = proc_idx == 1 ? READY : SLEEP;
-
-  char buffer[BUFF_SIZE];
-
+  char sock_path[PATH_SIZE];
   char to_sock_path[PATH_SIZE];
 
-  sprintf(sock_path, "/tmp/socket%c", proc_idx == 0 ? '0' : '1');
-  sprintf(to_sock_path, "/tmp/socket%c", (1 - proc_idx == 0) ? '0' : '1');
+  sprintf(sock_path, "/tmp/socket%c", id == 0 ? '0' : '1');
+  sprintf(to_sock_path, "/tmp/socket%c", id == 0 ? '1' : '0');
 
-  sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  int sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
 
   if (sockfd < 0) {
     perror("Failed to create socket");
@@ -66,20 +63,24 @@ int main(int argc, char *argv[]) {
   const char *cmd = "wake";
   ssize_t cmd_len = strlen(cmd);
   ssize_t n;
-  while (1) {
+  for (int i = 0; i < N_ITERS; i++) {
     if (st == SLEEP) {
-      memset(buffer, 0, BUFF_SIZE);
 
-      n = recvfrom(sockfd, buffer, BUFF_SIZE, 0, (struct sockaddr *)&to_addr,
-                   &to_addr_len);
+      while (1) {
+        memset(buffer, 0, BUFFER_SIZE);
 
-      if (n < 0) {
-        perror("Ошибка при получении данных");
-        continue;
-      }
-      if (n == cmd_len && !strncmp(buffer, cmd, n)) {
-        st = READY;
-        printf("process %d changed state to READY\n", proc_idx);
+        n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0,
+                     (struct sockaddr *)&to_addr, &to_addr_len);
+
+        if (n < 0) {
+          perror("Ошибка при получении данных");
+          continue;
+        }
+        if (n == cmd_len && !strncmp(buffer, cmd, n)) {
+          st = READY;
+          printf("process %d changed state to READY\n", id);
+          break;
+        }
       }
     } else {
 
@@ -88,10 +89,14 @@ int main(int argc, char *argv[]) {
       if (sendto(sockfd, cmd, cmd_len, 0, (const struct sockaddr *)&to_addr,
                  to_addr_len) < 0) {
         perror("Failed to send msg");
+        close(sockfd);
+        unlink(sock_path);
+        exit(1);
       } else {
-        printf("process %d changed state to SLEEP\n", proc_idx);
+        printf("process %d changed state to SLEEP\n", id);
         st = SLEEP;
       }
     }
   }
+  unlink(sock_path);
 }
