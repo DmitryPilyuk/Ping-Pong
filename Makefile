@@ -1,9 +1,9 @@
 CC=gcc
-CFLAGS=-Wall -Wextra -Werror -g -std=c99 
+CFLAGS=-Wall -Wextra -Werror -g 
 LDFLAGS=
 
 TARGET=ping_pong
-SRC=main.c
+SRC=main.c sync.c
 OBJ=$(SRC:.c=.o)
 
 .PHONY: all clean
